@@ -10,30 +10,35 @@ from telegram.ext import (
     filters
 )
 
-# Telegram токени
 TOKEN = os.getenv("BOT_TOKEN")
 
-# Render үчүн порт ачуу
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Music Bot is running")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+
 def run_server():
     port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    server.serve_forever()
+    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
-# Баштоо
+
 async def start(update, context):
     await update.message.reply_text(
-        "Салам! 🎵 Музыка ботко кош келиңиз!\n"
-        "Ырдын атын жазыңыз."
+        "🎵 Салам! Музыка ботко кош келиңиз!\n\n"
+        "🔎 Ырдын атын жазыңыз.\n"
+        "📁 Же MP3 файл жөнөтүңүз."
     )
 
-# Музыка издөө
-async def message(update, context):
+
+# Ыр издөө
+async def search_music(update, context):
     song = update.message.text
 
     await update.message.reply_text("🔎 Ыр изделүүдө...")
@@ -52,7 +57,7 @@ async def message(update, context):
         data = response.json()
 
         if data["resultCount"] == 0:
-            await update.message.reply_text("Ыр табылган жок.")
+            await update.message.reply_text("❌ Ыр табылган жок.")
             return
 
         for item in data["results"]:
@@ -66,29 +71,57 @@ async def message(update, context):
                 )
                 return
 
-        await update.message.reply_text(
-            "Бул ырдын аудио үзүндүсү жок."
-        )
+        await update.message.reply_text("Аудио үзүндүсү жок.")
 
     except Exception as e:
         print("Ката:", e)
         await update.message.reply_text("Издөөдө ката чыкты.")
 
-# Ботту иштетүү
+
+# MP3 кабыл алуу
+async def upload_music(update, context):
+    msg = update.message
+
+    if msg.audio:
+        file_id = msg.audio.file_id
+        title = msg.audio.title or msg.audio.file_name or "Музыка"
+        performer = msg.audio.performer or ""
+
+    elif msg.document and msg.document.mime_type:
+        if not msg.document.mime_type.startswith("audio/"):
+            await msg.reply_text("MP3 же аудио файл жөнөтүңүз.")
+            return
+
+        file_id = msg.document.file_id
+        title = msg.document.file_name or "Музыка"
+        performer = ""
+
+    else:
+        return
+
+    await msg.reply_text("✅ Музыка кабыл алынды!")
+
+    await msg.reply_audio(
+        audio=file_id,
+        title=title,
+        performer=performer
+    )
+
+
 if __name__ == "__main__":
     if not TOKEN:
         raise ValueError("BOT_TOKEN табылган жок!")
 
-    threading.Thread(
-        target=run_server,
-        daemon=True
-    ).start()
+    threading.Thread(target=run_server, daemon=True).start()
 
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, message)
+        MessageHandler(filters.AUDIO | filters.Document.AUDIO, upload_music)
+    )
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, search_music)
     )
 
     print("🎵 Бот иштеп жатат!")
