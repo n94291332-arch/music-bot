@@ -3,15 +3,17 @@ import threading
 import requests
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     filters
 )
 
 TOKEN = os.getenv("BOT_TOKEN")
-
+music_files = {}
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -23,90 +25,89 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
-
 def run_server():
     port = int(os.environ.get("PORT", 10000))
     HTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
-
 async def start(update, context):
     await update.message.reply_text(
-        "🎵 Салам! Музыка ботко кош келиңиз!\n\n"
-        "🔎 Ырдын атын жазыңыз.\n"
-        "📁 Же MP3 файл жөнөтүңүз."
+        "🎵 Музыка бот!\n"
+        "Ырдын атын жаз же MP3 файл жөнөт."
     )
 
-
-# Ыр издөө
 async def search_music(update, context):
     song = update.message.text
-
-    await update.message.reply_text("🔎 Ыр изделүүдө...")
+    await update.message.reply_text("🔎 Изделүүдө...")
 
     try:
-        response = requests.get(
+        r = requests.get(
             "https://itunes.apple.com/search",
-            params={
-                "term": song,
-                "entity": "song",
-                "limit": 5
-            },
+            params={"term": song, "entity": "song", "limit": 5},
             timeout=20
         )
+        data = r.json()
 
-        data = response.json()
-
-        if data["resultCount"] == 0:
-            await update.message.reply_text("❌ Ыр табылган жок.")
+        if not data["results"]:
+            await update.message.reply_text("Ыр табылган жок.")
             return
 
         for item in data["results"]:
+            title = item.get("trackName", "Музыка")
+            artist = item.get("artistName", "Белгисиз")
             audio = item.get("previewUrl")
 
             if audio:
-                await update.message.reply_audio(
-                    audio=audio,
-                    title=item.get("trackName", "Музыка"),
-                    performer=item.get("artistName", "")
-                )
-                return
+                keyboard = [[
+                    InlineKeyboardButton("▶️ Угуу", url=audio),
+                    InlineKeyboardButton("⬇️ Үзүндү", url=audio)
+                ]]
 
-        await update.message.reply_text("Аудио үзүндүсү жок.")
+                await update.message.reply_text(
+                    f"🎵 {title}\n👤 {artist}\n\n"
+                    "Бул каталогдогу кыска үзүндү.",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
 
     except Exception as e:
-        print("Ката:", e)
+        print(e)
         await update.message.reply_text("Издөөдө ката чыкты.")
 
-
-# MP3 кабыл алуу
 async def upload_music(update, context):
     msg = update.message
 
     if msg.audio:
         file_id = msg.audio.file_id
         title = msg.audio.title or msg.audio.file_name or "Музыка"
-        performer = msg.audio.performer or ""
+        artist = msg.audio.performer or "Белгисиз"
 
     elif msg.document and msg.document.mime_type:
         if not msg.document.mime_type.startswith("audio/"):
-            await msg.reply_text("MP3 же аудио файл жөнөтүңүз.")
+            await msg.reply_text("Аудио файл жөнөт.")
             return
-
         file_id = msg.document.file_id
         title = msg.document.file_name or "Музыка"
-        performer = ""
+        artist = "Белгисиз"
 
     else:
         return
 
-    await msg.reply_text("✅ Музыка кабыл алынды!")
+    music_files[title.lower()] = file_id
 
-    await msg.reply_audio(
-        audio=file_id,
-        title=title,
-        performer=performer
+    await msg.reply_text(
+        f"✅ {title}\n👤 {artist}\n"
+        "Музыка кабыл алынды!"
     )
 
+async def play_music(update, context):
+    query = update.callback_query
+    await query.answer()
+    title = query.data
+
+    file_id = music_files.get(title.lower())
+    if file_id:
+        await query.message.reply_audio(audio=file_id)
+    else:
+        await query.message.reply_text("Файл табылган жок.")
 
 if __name__ == "__main__":
     if not TOKEN:
@@ -115,7 +116,6 @@ if __name__ == "__main__":
     threading.Thread(target=run_server, daemon=True).start()
 
     app = Application.builder().token(TOKEN).build()
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(
         MessageHandler(filters.AUDIO | filters.Document.AUDIO, upload_music)
@@ -124,5 +124,4 @@ if __name__ == "__main__":
         MessageHandler(filters.TEXT & ~filters.COMMAND, search_music)
     )
 
-    print("🎵 Бот иштеп жатат!")
     app.run_polling()
