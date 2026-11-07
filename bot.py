@@ -1,10 +1,23 @@
-import os, asyncio, tempfile, glob
+import os, asyncio, tempfile, glob, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import yt_dlp
 from telegram import Update
 from telegram.ext import (ApplicationBuilder, CommandHandler,
                           MessageHandler, filters, ContextTypes)
 
 TOKEN = os.environ["TOKEN"]
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+    def log_message(self, *a):
+        pass
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    HTTPServer(("0.0.0.0", port), H).serve_forever()
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Привет! Напиши название песни, я найду 🎵")
@@ -46,6 +59,8 @@ async def search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await msg.edit_text("Ката чыкты, кайра аракет кылыңыз.")
             print(e)
+
+threading.Thread(target=run_web, daemon=True).start()
 
 app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
